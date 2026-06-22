@@ -247,17 +247,36 @@ def prioritize(post, queue):
             _write_slot(entry, pp, target)
             return entry
 
-        # Slot 0 taken by a queue entry: ladder every movable entry up one index.
+        # Slot 0 taken by a queue entry: ladder every movable entry up to its
+        # next free slot. Each mover lands on the earliest candidate after its
+        # current index that is neither held by a post we can't move (foreign /
+        # manual / out-of-horizon) nor already claimed by another mover — so the
+        # ladder never double-books and never runs off the lookahead horizon.
         index_of = {dt: i for i, dt in enumerate(candidates)}
         movers = [
             (index_of[e.assigned_slot_datetime], e, p) for e, p in movable if e.assigned_slot_datetime in index_of
         ]
-        max_i = max((i for i, _, _ in movers), default=0)
-        if max_i + 1 >= len(candidates):
-            candidates = _next_slot_datetimes(queue.social_account, now, count=max_i + 2)
-        # Descending so each destination slot is vacated before it is written.
-        for i, e, p in sorted(movers, key=lambda t: t[0], reverse=True):
-            _write_slot(e, p, candidates[i + 1])
+        mover_old_dts = {e.assigned_slot_datetime for _, e, _ in movers}
+        # Datetimes that must stay free: everything occupied on this channel
+        # except the movers we are about to relocate (their slots are vacated).
+        avoid_dts = (
+            _occupied_datetimes(queue.social_account, exclude_pp_ids=[pp.id] if pp is not None else []) - mover_old_dts
+        )
+
+        assigned_idx = {0}  # slot 0 is reserved for the prioritized post
+        # Descending so a destination is always vacated before it is written.
+        for cur_idx, e, p in sorted(movers, key=lambda t: t[0], reverse=True):
+            j = cur_idx + 1
+            while True:
+                if j >= len(candidates):
+                    candidates = _next_slot_datetimes(queue.social_account, now, count=j + 2)
+                    if j >= len(candidates):
+                        raise QueueFullError(f"Queue {queue.id} has no open slot within the scheduling horizon.")
+                if j not in assigned_idx and candidates[j] not in avoid_dts:
+                    break
+                j += 1
+            assigned_idx.add(j)
+            _write_slot(e, p, candidates[j])
         _write_slot(entry, pp, candidates[0])
         return entry
 

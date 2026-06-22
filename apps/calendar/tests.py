@@ -989,6 +989,53 @@ class SlotOccupancyQueueTests(TestCase):
         with self.assertRaises(QueueFullError):
             add_post_next_available(post, queue)
 
+    def test_prioritize_ladder_skips_foreign_occupied_slot(self):
+        # A manually-scheduled post (no QueueEntry) the queue can't move must not
+        # be double-booked: the laddered mover skips its slot.
+        c = self._cands()
+        _, pp_mover, _ = self._occupy(c[0], caption="mover")  # queue entry holds slot 0
+        foreign = Post.objects.create(workspace=self.workspace, caption="manual")
+        pp_foreign = PlatformPost.objects.create(
+            post=foreign, social_account=self.account, status=PlatformPost.Status.SCHEDULED, scheduled_at=c[1]
+        )
+        post = self._add()
+
+        prioritize(post, self.queue)
+
+        pp_new = PlatformPost.objects.get(post=post, social_account=self.account)
+        pp_mover.refresh_from_db()
+        pp_foreign.refresh_from_db()
+        self.assertEqual(pp_new.scheduled_at, c[0])  # new takes the top
+        self.assertEqual(pp_foreign.scheduled_at, c[1])  # immovable, untouched
+        self.assertEqual(pp_mover.scheduled_at, c[2])  # skipped the foreign slot
+        # Three live posts hold three distinct slots — no collision.
+        self.assertEqual(len({pp_new.scheduled_at, pp_mover.scheduled_at, pp_foreign.scheduled_at}), 3)
+
+    def test_prioritize_raises_queue_full_when_ladder_exhausts_horizon(self):
+        # A channel with a single weekly slot: fill every slot in the horizon, so
+        # the prioritize ladder has nowhere to push the top mover.
+        weekly = SocialAccount.objects.create(
+            workspace=self.workspace,
+            platform="bluesky",
+            account_platform_id="bs-weekly",
+            account_name="W",
+            connection_status=SocialAccount.ConnectionStatus.CONNECTED,
+        )
+        PostingSlot.objects.create(social_account=weekly, day_of_week=0, time=time(9, 0))  # Mondays only
+        queue = Queue.objects.create(workspace=self.workspace, name="Weekly Q", social_account=weekly)
+        for i, dt in enumerate(_next_slot_datetimes(weekly, timezone.now(), count=200)):
+            p = Post.objects.create(workspace=self.workspace, caption=f"m{i}")
+            PlatformPost.objects.create(
+                post=p, social_account=weekly, status=PlatformPost.Status.SCHEDULED, scheduled_at=dt
+            )
+            QueueEntry.objects.create(queue=queue, post=p, position=i, assigned_slot_datetime=dt)
+
+        newp = Post.objects.create(workspace=self.workspace, caption="new")
+        PlatformPost.objects.create(post=newp, social_account=weekly, status=PlatformPost.Status.DRAFT)
+
+        with self.assertRaises(QueueFullError):
+            prioritize(newp, queue)
+
 
 class QueueEntryEndpointTests(TestCase):
     """HTTP endpoints for single-entry remove / reslot (workspace-scoped)."""

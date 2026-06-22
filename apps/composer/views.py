@@ -776,6 +776,8 @@ def save_post(request, workspace_id, post_id=None):
         pending_target = "scheduled"
         initial_status = "scheduled"
     elif action == "add_to_queue":
+        from django.db import transaction
+
         from apps.calendar.services import QueueFullError, add_to_queue
 
         queue_id = request.POST.get("queue_id")
@@ -788,18 +790,22 @@ def save_post(request, workspace_id, post_id=None):
         # Ensure PlatformPost rows exist for every selected account before the
         # queue service writes per-platform scheduled_at values.
         _sync_platform_posts(request, post, workspace, initial_status="draft")
+        # If opened from a specific calendar day (month/week/day "+" CTA), that
+        # day is each queue's slot floor.
+        floor_date = form.cleaned_data.get("scheduled_date")
         try:
-            for q in queues:
-                add_to_queue(post, q)
+            # One transaction across every queue: if a later queue is full, the
+            # earlier queues' slot writes roll back instead of leaving a child
+            # half-queued.
+            with transaction.atomic():
+                for q in queues:
+                    add_to_queue(post, q)
+                if floor_date:
+                    _reassign_queue_slots_from_floor(queues, post, floor_date, workspace)
+                # Transition every child whose scheduled_at was filled in.
+                _transition_post_children(post, "scheduled", only=_scoped_platform_post_ids(request, post))
         except QueueFullError:
             return JsonResponse({"errors": {"queue": _QUEUE_FULL_MSG}}, status=400)
-        # If opened from a specific calendar day (month/week/day "+" CTA), each
-        # queue should use that day as its floor - re-assign slots accordingly.
-        floor_date = form.cleaned_data.get("scheduled_date")
-        if floor_date:
-            _reassign_queue_slots_from_floor(queues, post, floor_date, workspace)
-        # Transition every child whose scheduled_at was filled in to "scheduled".
-        _transition_post_children(post, "scheduled", only=_scoped_platform_post_ids(request, post))
         _save_version(post, request.user)
         if request.htmx:
             return HttpResponse(
@@ -811,6 +817,8 @@ def save_post(request, workspace_id, post_id=None):
             )
         return redirect("composer:compose_edit", workspace_id=workspace.id, post_id=post.id)
     elif action == "add_to_queue_priority":
+        from django.db import transaction
+
         from apps.calendar.services import QueueFullError, add_to_queue
 
         queue_id = request.POST.get("queue_id")
@@ -822,11 +830,13 @@ def save_post(request, workspace_id, post_id=None):
         post.save()
         _sync_platform_posts(request, post, workspace, initial_status="draft")
         try:
-            for q in queues:
-                add_to_queue(post, q, priority=True)
+            # One transaction across every queue (see add_to_queue above).
+            with transaction.atomic():
+                for q in queues:
+                    add_to_queue(post, q, priority=True)
+                _transition_post_children(post, "scheduled", only=_scoped_platform_post_ids(request, post))
         except QueueFullError:
             return JsonResponse({"errors": {"queue": _QUEUE_FULL_MSG}}, status=400)
-        _transition_post_children(post, "scheduled", only=_scoped_platform_post_ids(request, post))
         _save_version(post, request.user)
         if request.htmx:
             return HttpResponse(
