@@ -167,6 +167,36 @@ class TestConnectPlatformView:
 
 
 @pytest.mark.django_db
+class TestReconnectView:
+    def test_pkce_reconnect_generates_and_forwards_verifier(self, authenticated_client, workspace):
+        """Reconnecting a TikTok account must regenerate + forward a PKCE verifier;
+        reconnect previously sent no code_challenge -> TikTok errCode 10007."""
+        account = SocialAccount.objects.create(
+            workspace=workspace,
+            platform="tiktok",
+            account_platform_id="open-1",
+            account_name="My TikTok",
+        )
+
+        mock_provider = MagicMock()
+        mock_provider.uses_pkce = True
+        mock_provider.get_auth_url.return_value = "https://www.tiktok.com/v2/auth/authorize/?ok=1"
+
+        url = reverse(
+            "social_accounts:reconnect",
+            kwargs={"workspace_id": workspace.id, "account_id": account.id},
+        )
+        with patch("apps.social_accounts.views._get_provider_for_platform", return_value=mock_provider):
+            response = authenticated_client.post(url)
+
+        assert response.status_code == 302
+        verifier = authenticated_client.session[OAUTH_SESSION_KEY]["code_verifier"]
+        assert verifier  # non-empty
+        _, kwargs = mock_provider.get_auth_url.call_args
+        assert kwargs["code_verifier"] == verifier
+
+
+@pytest.mark.django_db
 class TestOAuthCallbackView:
     def test_error_parameter_shows_message(self, authenticated_client):
         url = reverse("social_accounts:oauth_callback", kwargs={"platform": "facebook"})
