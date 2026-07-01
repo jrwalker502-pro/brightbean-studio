@@ -40,13 +40,16 @@ def from_url_slug(slug: str) -> str:
 def redirect_uri_from_request(request) -> str:
     """Rebuild the OAuth redirect URI from the incoming callback request.
 
-    OAuth token exchange requires the ``redirect_uri`` parameter to match
-    the URL used at authorization EXACTLY. Reconstructing from
-    ``request.path`` (instead of ``reverse()``-ing the current canonical
-    URL) preserves whatever path the platform actually called back to —
-    important during transitions where the canonical slug changes (e.g.
-    TikTok's ``tiktok`` → ``social1`` rename) and any auth started before
-    the deploy would otherwise rebuild to the new path and fail TikTok's
-    exact-match check.
+    OAuth token exchange requires the ``redirect_uri`` parameter to match the
+    URL used at authorization EXACTLY. We keep the actual called-back
+    ``request.path`` (so a slug transition like TikTok ``tiktok`` -> ``social1``
+    still matches), but anchor the scheme + host to the stable ``APP_URL``
+    setting instead of ``request.build_absolute_uri``. Behind a reverse proxy
+    (e.g. Railway) the request-derived scheme/host can differ from the
+    auth-dialog build and break the provider's byte-exact redirect_uri check
+    (Instagram Login returns HTTP 400 "redirect_uri ... identical to the one
+    you used in the OAuth dialog request").
     """
-    return request.build_absolute_uri(request.path)
+    from django.conf import settings
+
+    return f"{settings.APP_URL.rstrip('/')}{request.path}"
