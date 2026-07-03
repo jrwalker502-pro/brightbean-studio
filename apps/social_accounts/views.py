@@ -103,11 +103,25 @@ def _build_redirect_uri(request, platform):
     TikTok → ``social1``) use the opaque slug in the URL path so the
     redirect URI doesn't contain the platform brand name. The signed
     OAuth state still carries the real platform identifier.
+
+    Anchored to the stable ``APP_URL`` (not ``request.build_absolute_uri``) so the
+    scheme/host are deterministic behind a reverse proxy — the auth-dialog and
+    token-exchange redirect_uri must be byte-identical or the provider rejects
+    the code exchange (e.g. Instagram Login on Railway).
     """
     from django.urls import reverse
 
     url_slug = to_url_slug(platform)
-    return request.build_absolute_uri(reverse("social_accounts:oauth_callback", kwargs={"platform": url_slug}))
+    path = reverse("social_accounts:oauth_callback", kwargs={"platform": url_slug})
+    uri = f"{settings.APP_URL.rstrip('/')}{path}"
+    logger.warning(
+        "IG-DBG dialog: uri=%s | bau=%s | scheme=%s | host=%s",
+        uri,
+        request.build_absolute_uri(path),
+        request.scheme,
+        request.get_host(),
+    )
+    return uri
 
 
 def _sign_state(workspace_id, platform, user_id, nonce):
