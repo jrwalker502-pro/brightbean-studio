@@ -50,17 +50,7 @@ def redirect_uri_from_request(request) -> str:
     (Instagram Login returns HTTP 400 "redirect_uri ... identical to the one
     you used in the OAuth dialog request").
     """
-    import logging
-
     from django.conf import settings
 
     uri = f"{settings.APP_URL.rstrip('/')}{request.path}"
-    logging.getLogger("apps.social_accounts.oauth_aliases").warning(
-        "IG-DBG exchange: uri=%s | bau=%s | scheme=%s | host=%s | path=%s",
-        uri,
-        request.build_absolute_uri(request.path),
-        request.scheme,
-        request.get_host(),
-        request.path,
-    )
     return uri

@@ -186,6 +186,16 @@ class CreatePostRequest(Schema):
             "omitting it) leaves the post's default in place for that platform."
         ),
     )
+    platform_extra: dict | None = Field(
+        None,
+        description=(
+            "Optional per-platform settings written verbatim to the target's "
+            "``PlatformPost.platform_extra`` and read by the publisher/providers. "
+            "Use for privacy + post-type control the plain fields don't cover, e.g. "
+            "TikTok ``{'privacy_level': 'SELF_ONLY', 'post_type': 'short'}`` or "
+            "YouTube ``{'privacy_status': 'private'}``. Stored as-is; unknown keys are ignored."
+        ),
+    )
     action: PostAction = Field(
         "draft",
         description=(

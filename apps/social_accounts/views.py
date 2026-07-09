@@ -114,13 +114,6 @@ def _build_redirect_uri(request, platform):
     url_slug = to_url_slug(platform)
     path = reverse("social_accounts:oauth_callback", kwargs={"platform": url_slug})
     uri = f"{settings.APP_URL.rstrip('/')}{path}"
-    logger.warning(
-        "IG-DBG dialog: uri=%s | bau=%s | scheme=%s | host=%s",
-        uri,
-        request.build_absolute_uri(path),
-        request.scheme,
-        request.get_host(),
-    )
     return uri
 
 
