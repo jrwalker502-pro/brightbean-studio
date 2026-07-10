@@ -292,39 +292,24 @@ class TikTokProvider(SocialProvider):
                 retryable=False,
             )
 
-        # TEMP DIAGNOSTIC (remove after diagnosis): the worker deploy was tagged with
-        # the SELF_ONLY-default fix yet kept publishing public. Surface what the
-        # RUNNING image actually computed — this text lands in PlatformPost.publish_error,
-        # which is readable via the Agent API, so we can see the truth without logs.
-        _diag = (
-            f"[diag v2 privacy={privacy_level!r} explicit={privacy_level_is_explicit} "
-            f"extra_keys={sorted(content.extra.keys())}]"
+        privacy_level = self._check_creator_constraints(
+            access_token,
+            privacy_level,
+            content,
+            privacy_level_is_explicit=privacy_level_is_explicit,
         )
-        try:
-            privacy_level = self._check_creator_constraints(
-                access_token,
-                privacy_level,
-                content,
-                privacy_level_is_explicit=privacy_level_is_explicit,
-            )
 
-            # Prefer FILE_UPLOAD: PULL_FROM_URL requires the source domain to be
-            # verified with TikTok, which presigned S3/R2 URLs can't satisfy.
-            if content.media_files:
-                return self._publish_file_upload(access_token, content, privacy_level)
-            if content.media_urls:
-                return self._publish_pull_from_url(access_token, content, privacy_level)
-            raise PublishError(
-                "No video source provided (media_files or media_urls required)",
-                platform=self.platform_name,
-                retryable=False,
-            )
-        except PublishError as exc:
-            raise PublishError(
-                f"{_diag} {exc}",
-                platform=self.platform_name,
-                retryable=getattr(exc, "retryable", False),
-            ) from exc
+        # Prefer FILE_UPLOAD: PULL_FROM_URL requires the source domain to be
+        # verified with TikTok, which presigned S3/R2 URLs can't satisfy.
+        if content.media_files:
+            return self._publish_file_upload(access_token, content, privacy_level)
+        if content.media_urls:
+            return self._publish_pull_from_url(access_token, content, privacy_level)
+        raise PublishError(
+            "No video source provided (media_files or media_urls required)",
+            platform=self.platform_name,
+            retryable=False,
+        )
 
     def _check_creator_constraints(
         self,
