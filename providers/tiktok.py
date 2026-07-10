@@ -31,7 +31,13 @@ AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 API_BASE = "https://open.tiktokapis.com/v2"
 
-DEFAULT_PRIVACY_LEVEL = "PUBLIC_TO_EVERYONE"
+# Default to the ONLY privacy level an unaudited content-posting app is allowed
+# to use (SELF_ONLY). Until TikTok approves the app's content-posting audit, any
+# other level is rejected at /video/init/ with
+# ``unaudited_client_can_only_post_to_private_accounts``. This default also
+# upholds the system-wide "nothing goes public unattended" contract: a caller
+# must *explicitly* pass ``privacy_level`` in platform_extra to post publicly.
+DEFAULT_PRIVACY_LEVEL = "SELF_ONLY"
 VALID_PRIVACY_LEVELS = frozenset(
     {
         "PUBLIC_TO_EVERYONE",
