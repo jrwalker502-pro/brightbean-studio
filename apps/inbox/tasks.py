@@ -11,6 +11,7 @@ from apps.notifications.engine import notify
 from apps.notifications.models import EventType
 from apps.social_accounts.models import SocialAccount
 from providers import get_provider
+from providers.types import AuthType
 
 from .models import InboxMessage, InboxSLAConfig
 from .sentiment import analyze_sentiment
@@ -75,9 +76,23 @@ class InboxSyncEngine:
         )
         is_first_sync = last_msg is None
 
+        # Refresh the OAuth token if it's expiring/expired before polling — mirrors the
+        # publisher (apps/publisher/engine.py). Without this, short-lived tokens (Google/
+        # YouTube expire in ~1h) go stale between the 6-hourly health-check refreshes, so
+        # every inbox poll 401s "UNAUTHENTICATED". Guarded on auth_type so non-OAuth2
+        # platforms (e.g. Bluesky app-password) are untouched. Best-effort: on refresh
+        # failure we fall back to the stored token and let get_messages surface the error.
+        access_token = account.oauth_access_token
+        if account.token_expires_at and account.is_token_expiring_soon and provider.auth_type == AuthType.OAUTH2:
+            try:
+                access_token = account.refresh_oauth_token(provider)
+                logger.info("Refreshed token for %s (inbox sync)", account)
+            except Exception:
+                logger.exception("Token refresh failed for %s (inbox sync)", account)
+
         try:
             messages = provider.get_messages(
-                access_token=account.oauth_access_token,
+                access_token=access_token,
                 since=last_msg,
             )
         except NotImplementedError:
